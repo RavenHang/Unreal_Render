@@ -1,0 +1,35 @@
+{
+  "features": {
+    "video_id": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "frame_id": {
+      "dtype": "int32",
+      "_type": "Value"
+    },
+    "exr_filepath": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "camera_fov": {
+      "dtype": "float32",
+      "_type": "Value"
+    },
+    "camera_transform": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "Sequence"
+      },
+      "_type": "Sequence"
+    },
+    "caption": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "records": []
+}

@@ -1,0 +1,15 @@
+# Unreal Engine binary assets
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap   filter=lfs diff=lfs merge=lfs -text
+# Audio
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+# Textures
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.tga filter=lfs diff=lfs merge=lfs -text
+*.exr filter=lfs diff=lfs merge=lfs -text
+# 3D assets
+*.fbx filter=lfs diff=lfs merge=lfs -text
+# Movies
+*.mp4 filter=lfs diff=lfs merge=lfs -text

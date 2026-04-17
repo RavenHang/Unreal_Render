@@ -1,0 +1,21 @@
+Begin Object Class=/Script/Engine.BlendSpace1D Name="ThirdPerson_IdleRun_2D" ExportPath="/Script/Engine.BlendSpace1D'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPerson_IdleRun_2D.ThirdPerson_IdleRun_2D'"
+   Begin Object Class=/Script/UnrealEd.SceneThumbnailInfo Name="SceneThumbnailInfo_0" ExportPath="/Script/UnrealEd.SceneThumbnailInfo'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPerson_IdleRun_2D.ThirdPerson_IdleRun_2D:SceneThumbnailInfo_0'"
+   End Object
+   Begin Object Name="SceneThumbnailInfo_0" ExportPath="/Script/UnrealEd.SceneThumbnailInfo'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPerson_IdleRun_2D.ThirdPerson_IdleRun_2D:SceneThumbnailInfo_0'"
+   End Object
+   TargetWeightInterpolationSpeedPerSec=5.000000
+   bTargetWeightInterpolationEaseInOut=False
+   AnimLength=2.633333
+   bInterpolateUsingGrid=True
+   SampleData(0)=(Animation="/Script/Engine.AnimSequence'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPersonIdle.ThirdPersonIdle'")
+   SampleData(1)=(Animation="/Script/Engine.AnimSequence'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPersonWalk.ThirdPersonWalk'",SampleValue=(X=93.750000,Y=0.000000,Z=0.000000))
+   SampleData(2)=(Animation="/Script/Engine.AnimSequence'/Game/VRHA_KpopDance_A/Demo/Animations/ThirdPersonRun.ThirdPersonRun'",SampleValue=(X=375.000000,Y=0.000000,Z=0.000000))
+   GridSamples(0)=(Indices[0]=1,Indices[1]=0,Weights[1]=1.000000)
+   GridSamples(1)=(Indices[0]=1,Indices[1]=0,Weights[0]=1.000000)
+   GridSamples(2)=(Indices[0]=2,Indices[1]=1,Weights[0]=0.333333,Weights[1]=0.666667)
+   GridSamples(3)=(Indices[0]=2,Indices[1]=1,Weights[0]=0.666667,Weights[1]=0.333333)
+   GridSamples(4)=(Indices[0]=2,Indices[1]=1,Weights[0]=1.000000)
+   BlendParameters(0)=(DisplayName="Speed",Max=375.000000)
+   Skeleton="/Script/Engine.Skeleton'/Game/VRHA_KpopDance_A/Character/SK_Mannequin_Skeleton.SK_Mannequin_Skeleton'"
+   ThumbnailInfo="/Script/UnrealEd.SceneThumbnailInfo'SceneThumbnailInfo_0'"
+End Object

@@ -1,0 +1,5 @@
+[
+    {"frame": 0, "x": 0.0, "y": 100.0, "z": 100.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0, "focal_length": 35.0},
+    {"frame": 40, "x": 0.0, "y": 175.0, "z": 100.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0, "focal_length": 35.0},
+    {"frame": 80, "x": 0.0, "y": 250.0, "z": 100.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0, "focal_length": 35.0}
+  ]
