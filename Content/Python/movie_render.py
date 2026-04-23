@@ -8,8 +8,9 @@ import re
 # -----------------------------
 QUEUE_ASSET_PATH = os.environ.get("QUEUE_ASSET_PATH", "/Game/Cinematics/EditorMoviePipelineQueue")
 MRQ_CONFIG_PATH = os.environ.get("MRQ_CONFIG_PATH", "/Game/Cinematics/MoviePipelineQueueConfig")
-OUTPUT_JSON_DIR = os.environ.get("OUTPUT_JSON_DIR", r"D:\dataset\jsonl")
+OUTPUT_JSON_DIR = os.environ.get("OUTPUT_JSON_DIR", r"D:\dataset")
 RENDER_OUTPUT_DIR = os.environ.get("RENDER_OUTPUT_DIR", r"D:\dataset\movies")
+MAP_PATH = os.environ.get("MAP_PATH", "/Game/Downtown_West/Maps/Demo_Environment")
 
 _executor_ref = None
 
@@ -159,7 +160,7 @@ def _on_executor_finished(executor, success):
 
 def render_queue_and_export_dataset():
     global _executor_ref
-
+    unreal.EditorLoadingAndSavingUtils.load_map(MAP_PATH)
     subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     queue_asset = unreal.EditorAssetLibrary.load_asset(QUEUE_ASSET_PATH)
 
@@ -167,15 +168,20 @@ def render_queue_and_export_dataset():
         subsystem.load_queue(queue_asset)
 
     queue = subsystem.get_queue()
-    
+    # 获取渲染队列任务（具体视频）    
     for job in queue.get_jobs():
         cfg = job.get_configuration()
         cfg.copy_from(unreal.EditorAssetLibrary.load_asset(MRQ_CONFIG_PATH))
+        job.map = unreal.SoftObjectPath(MAP_PATH)
+
         out_setting = cfg.find_or_add_setting_by_class(unreal.MoviePipelineOutputSetting)
         out_setting.set_editor_property("output_directory", unreal.DirectoryPath(path=RENDER_OUTPUT_DIR))
         job.set_configuration(cfg)
-
+    # 进程方式
+    # _executor_ref = unreal.MoviePipelineInProcessExecutor()
     _executor_ref = unreal.MoviePipelinePIEExecutor()
+    _executor_ref.set_is_rendering_offscreen(True)
+    print('is render?', _executor_ref.is_rendering_offscreen())
     _executor_ref.on_executor_finished_delegate.add_callable_unique(_on_executor_finished)
     subsystem.render_queue_with_executor_instance(_executor_ref)
 
