@@ -49,8 +49,6 @@ def _resolve_sequence(job):
         
     return loaded_asset
 
-import unreal
-
 def _get_active_camera(level_sequence, player, current_frame):
     """
     根据传入的帧数获取激活的相机 Actor
@@ -85,6 +83,7 @@ def _get_active_camera(level_sequence, player, current_frame):
     except Exception as e:
         unreal.log_error(f"获取绑定对象失败: {e}")
         bound_objects = None
+        
     if bound_objects and len(bound_objects) > 0:
         return bound_objects[0]
         
@@ -131,16 +130,27 @@ def _sample_camera_data(job):
 # -----------------------------
 def _on_executor_finished(executor, success):
     if not success:
-        unreal.log_error("渲染任务未完全成功")
-    
+        unreal.log_error("渲染任务部分失败")
+    else:
+        unreal.log("所有视频渲染及数据提取任务结束！")
+
+def render_queue_and_export_dataset():
+    global _executor_ref
+    unreal.EditorLoadingAndSavingUtils.load_map(MAP_PATH)
     subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
+    queue_asset = unreal.EditorAssetLibrary.load_asset(QUEUE_ASSET_PATH)
+
+    if queue_asset:
+        subsystem.load_queue(queue_asset)
+
     queue = subsystem.get_queue()
     
     if not os.path.exists(OUTPUT_JSON_DIR):
         os.makedirs(OUTPUT_JSON_DIR)
+        
     for job in queue.get_jobs():
         name = job.job_name if job.job_name else "unnamed"
-        unreal.log(f"正在提取数据: {name}")
+        unreal.log(f"正在渲染前提取相机数据: {name}")
         try:
             data = _sample_camera_data(job)
             if data:
@@ -154,21 +164,10 @@ def _on_executor_finished(executor, success):
                 out_path = os.path.join(OUTPUT_JSON_DIR, f"{_safe_filename(name)}.jsonl")
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(json.dumps(jsonl_obj, ensure_ascii=False) + "\n")
-                unreal.log(f"成功写入: {out_path}")
+                unreal.log(f"成功写入数据: {out_path}")
         except Exception as e:
             unreal.log_error(f"提取数据失败: {str(e)}")
 
-def render_queue_and_export_dataset():
-    global _executor_ref
-    unreal.EditorLoadingAndSavingUtils.load_map(MAP_PATH)
-    subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
-    queue_asset = unreal.EditorAssetLibrary.load_asset(QUEUE_ASSET_PATH)
-
-    if queue_asset:
-        subsystem.load_queue(queue_asset)
-
-    queue = subsystem.get_queue()
-    # 获取渲染队列任务（具体视频）    
     for job in queue.get_jobs():
         cfg = job.get_configuration()
         cfg.copy_from(unreal.EditorAssetLibrary.load_asset(MRQ_CONFIG_PATH))
@@ -177,11 +176,10 @@ def render_queue_and_export_dataset():
         out_setting = cfg.find_or_add_setting_by_class(unreal.MoviePipelineOutputSetting)
         out_setting.set_editor_property("output_directory", unreal.DirectoryPath(path=RENDER_OUTPUT_DIR))
         job.set_configuration(cfg)
-    # 进程方式
-    # _executor_ref = unreal.MoviePipelineInProcessExecutor()
+        
     _executor_ref = unreal.MoviePipelinePIEExecutor()
     _executor_ref.set_is_rendering_offscreen(True)
-    print('is render?', _executor_ref.is_rendering_offscreen())
+    print('is render offscreen?', _executor_ref.is_rendering_offscreen())
     _executor_ref.on_executor_finished_delegate.add_callable_unique(_on_executor_finished)
     subsystem.render_queue_with_executor_instance(_executor_ref)
 
