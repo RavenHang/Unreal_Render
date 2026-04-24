@@ -2,6 +2,8 @@
 import os
 import json
 import re
+import glob
+import subprocess
 
 # -----------------------------
 # 配置
@@ -11,8 +13,10 @@ MRQ_CONFIG_PATH = os.environ.get("MRQ_CONFIG_PATH", "/Game/Cinematics/MoviePipel
 OUTPUT_JSON_DIR = os.environ.get("OUTPUT_JSON_DIR", r"D:\dataset")
 RENDER_OUTPUT_DIR = os.environ.get("RENDER_OUTPUT_DIR", r"D:\dataset\movies")
 MAP_PATH = os.environ.get("MAP_PATH", "/Game/Downtown_West/Maps/Demo_Environment")
+ENCODE_FPS = int(os.environ.get("ENCODE_FPS", "24"))
 
 _executor_ref = None
+_job_output_info_for_encode = {}
 
 
 # -----------------------------
@@ -163,11 +167,10 @@ def _sample_camera_data(job):
     return records
 
 
-def _configure_exr_output(cfg, render_dir: str, file_stub: str):
+def _configure_png_output(cfg, render_dir: str, file_stub: str):
     """
-    把输出格式固定为 EXR，并移除常见视频编码输出设置。
+    把输出格式固定为 PNG，并移除常见视频编码输出设置。
     """
-    # 移除常见视频输出设置（防止同时导出 mp4/prores）
     removable_keywords = (
         "AppleProRes",
         "AvidDNx",
@@ -179,13 +182,70 @@ def _configure_exr_output(cfg, render_dir: str, file_stub: str):
         if any(k in class_name for k in removable_keywords):
             cfg.remove_setting(setting)
 
-    # 添加 EXR 序列输出
-    cfg.find_or_add_setting_by_class(unreal.MoviePipelineImageSequenceOutput_EXR)
+    # 添加 PNG 序列输出
+    cfg.find_or_add_setting_by_class(unreal.MoviePipelineImageSequenceOutput_PNG)
 
     # 通用输出设置
     out_setting = cfg.find_or_add_setting_by_class(unreal.MoviePipelineOutputSetting)
     out_setting.set_editor_property("output_directory", unreal.DirectoryPath(path=render_dir))
     out_setting.set_editor_property("file_name_format", f"{file_stub}.{{frame_number}}")
+
+
+def _to_ffmpeg_pattern(first_path: str, ext: str) -> str:
+    """
+    将 Unreal 输出的 xxx.0001.<ext> 推断为 ffmpeg 可读的 xxx.%04d.<ext>
+    """
+    m = re.match(rf"^(.*)\.(\d+)\.{ext}$", first_path, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    prefix, digits = m.group(1), m.group(2)
+    return f"{prefix}.%0{len(digits)}d.{ext}"
+
+
+def _encode_mp4_from_png_dir(render_dir: str, safe_name: str, fps: int = 24):
+    """
+    从 render_dir 中查找 <safe_name>.*.png，并调用 ffmpeg 合成 mp4。
+    """
+    png_glob = os.path.join(render_dir, f"{safe_name}.*.png")
+    png_files = sorted(glob.glob(png_glob))
+    if not png_files:
+        unreal.log_warning(f"[{safe_name}] 未找到 PNG 序列，跳过转码: {png_glob}")
+        return
+
+    input_pattern = _to_ffmpeg_pattern(png_files[0], "png")
+    if not input_pattern:
+        unreal.log_warning(f"[{safe_name}] 无法推断序列编号格式，跳过转码")
+        return
+
+    out_mp4 = os.path.join(render_dir, f"{safe_name}.mp4")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-framerate", str(fps),
+        "-i", input_pattern,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", "18",
+        "-preset", "slow",
+        out_mp4,
+    ]
+
+    unreal.log(f"[{safe_name}] 开始转码 MP4: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        if result.stdout:
+            unreal.log(result.stdout)
+        if result.stderr:
+            unreal.log(result.stderr)
+        unreal.log(f"[{safe_name}] MP4 生成成功: {out_mp4}")
+    except FileNotFoundError:
+        unreal.log_error("未找到 ffmpeg，请先在 Linux 镜像中安装 ffmpeg 并确保在 PATH 中")
+    except subprocess.CalledProcessError as e:
+        unreal.log_error(f"[{safe_name}] ffmpeg 转码失败，退出码: {e.returncode}")
+        if e.stdout:
+            unreal.log_error(e.stdout)
+        if e.stderr:
+            unreal.log_error(e.stderr)
 
 
 # -----------------------------
@@ -194,12 +254,19 @@ def _configure_exr_output(cfg, render_dir: str, file_stub: str):
 def _on_executor_finished(executor, success):
     if not success:
         unreal.log_error("渲染任务部分失败")
-    else:
-        unreal.log("所有视频渲染及数据提取任务结束！")
+        return
+
+    unreal.log("所有视频渲染及数据提取任务结束，开始合成 MP4...")
+    for idx in sorted(_job_output_info_for_encode.keys()):
+        job_name, safe_name, render_dir = _job_output_info_for_encode[idx]
+        _encode_mp4_from_png_dir(render_dir, safe_name, fps=ENCODE_FPS)
+
+    unreal.log("所有 MP4 合成结束。")
 
 
 def render_queue_and_export_dataset():
     global _executor_ref
+    global _job_output_info_for_encode
 
     unreal.EditorLoadingAndSavingUtils.load_map(MAP_PATH)
 
@@ -226,6 +293,9 @@ def render_queue_and_export_dataset():
         render_dir = _make_incremental_output_dir(RENDER_OUTPUT_DIR, job_name)
         job_output_info[idx] = (job_name, safe_name, render_dir)
 
+    # 供回调阶段使用（渲染完成后自动转码）
+    _job_output_info_for_encode = dict(job_output_info)
+
     # 渲染前提取相机数据并写 jsonl
     for idx, job in enumerate(jobs):
         job_name, safe_name, render_dir = job_output_info[idx]
@@ -236,7 +306,7 @@ def render_queue_and_export_dataset():
             if data:
                 jsonl_obj = {
                     "video_id": job_name,
-                    "video_path": f"{render_dir}/{safe_name}.####.exr",
+                    "video_path": f"{render_dir}/{safe_name}.####.png",
                     "frame_count": len(data),
                     "camera_trajectory": data,
                     "text_prompt": "",
@@ -250,7 +320,7 @@ def render_queue_and_export_dataset():
         except Exception as e:
             unreal.log_error(f"提取数据失败: {str(e)}")
 
-    # 配置渲染任务：输出改为 EXR + 唯一目录
+    # 配置渲染任务：输出改为 PNG + 唯一目录
     for idx, job in enumerate(jobs):
         job_name, safe_name, render_dir = job_output_info[idx]
 
@@ -260,7 +330,7 @@ def render_queue_and_export_dataset():
             cfg.copy_from(preset)
 
         job.map = unreal.SoftObjectPath(MAP_PATH)
-        _configure_exr_output(cfg, render_dir, safe_name)
+        _configure_png_output(cfg, render_dir, safe_name)
         job.set_configuration(cfg)
 
         unreal.log(f"[{job_name}] 输出目录: {render_dir}")

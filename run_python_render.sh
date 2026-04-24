@@ -20,5 +20,5 @@ fi
   -unattended -NoSplash -NoLoadingScreen -NoSound -NoP4 \
   -RenderOffscreen \
   -stdout -FullStdOutLogOutput \
-  -ExecutePythonScript="$PY_SCRIPT" \
+  -ExecCmds="$PY_SCRIPT" \
   -log
