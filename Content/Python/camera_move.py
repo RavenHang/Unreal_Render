@@ -281,39 +281,38 @@ def create_sequence_from_data(
     else:
         unreal.log_warning(f"Sequencer 创建成功，但自动保存失败。请手动在内容浏览器中保存 {sequence_name}。")
 
-def batch_create_sequences_from_dolly_in(
-    dolly_in_folder=None,
+def batch_create_sequences(
+    folder=None,
     anim_folder_path="/Game/Characters/Mannequins/Anims/Test",
     sequence_base_path="/Game/Cinematics",
     target_tag="Actor",
 ):
+    print('执行脚本生成')
     """
     批量读取 dolly_in 文件夹下所有 JSON 文件 和 /Game/Characters/Mannequins/Anims 下所有动画，
     生成所有组合的 Sequence，命名为 scene1_{json_name_no_ext}_{anim_name}。
     
-    :param dolly_in_folder: JSON 文件夹路径（默认为 Python 脚本同级目录的 dataset/dolly_in）
+    :param folder: JSON 文件夹路径（可传入任意本地目录；为空时默认 Python 脚本同级目录的 dataset/dolly_in）
     :param anim_folder_path: UE 资产路径中的动画文件夹
     :param sequence_base_path: 生成的 Sequence 保存路径
     :param target_tag: 目标角色 Tag
     """
-    if dolly_in_folder is None:
-        # 获取脚本所在目录的 dataset/dolly_in 文件夹
-        script_dir = os.path.dirname(__file__)
-        dolly_in_folder = os.path.join(script_dir, "dataset", "dolly_in")
+    script_dir = os.path.dirname(__file__)
+    folder = os.path.join(script_dir, "dataset", f"{folder}")
     
-    if not os.path.exists(dolly_in_folder):
-        unreal.log_error(f"dolly_in 文件夹不存在: {dolly_in_folder}")
+    if not os.path.exists(folder):
+        unreal.log_error(f"文件夹不存在: {folder}")
         return
     
     # 1. 收集所有 JSON 文件
     json_files = []
-    for file_name in os.listdir(dolly_in_folder):
+    for file_name in os.listdir(folder):
         if file_name.endswith(".json"):
-            json_path = os.path.join(dolly_in_folder, file_name)
+            json_path = os.path.join(folder, file_name)
             json_files.append((file_name[:-5], json_path))  # (name_no_ext, full_path)
     
     if not json_files:
-        unreal.log_warning(f"在 {dolly_in_folder} 中未找到 JSON 文件")
+        unreal.log_warning(f"在 {folder} 中未找到 JSON 文件")
         return
     
     unreal.log(f"找到 {len(json_files)} 个 JSON 文件")

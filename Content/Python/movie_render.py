@@ -11,7 +11,7 @@ import subprocess
 QUEUE_ASSET_PATH = os.environ.get("QUEUE_ASSET_PATH", "/Game/Cinematics/EditorMoviePipelineQueue")
 MRQ_CONFIG_PATH = os.environ.get("MRQ_CONFIG_PATH", "/Game/Cinematics/MoviePipelineQueueConfig")
 OUTPUT_ROOT_DIR = os.environ.get("OUTPUT_ROOT_DIR", r"D:\dataset\output")
-MAP_PATH = os.environ.get("MAP_PATH", "/Game/Downtown_West/Maps/Demo_Environment")
+MAP_PATH = os.environ.get("MAP_PATH", "/Game/Downtown_West/Maps/Town")
 ENCODE_FPS = int(os.environ.get("ENCODE_FPS", "15"))
 
 _executor_ref = None
