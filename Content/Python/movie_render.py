@@ -10,10 +10,9 @@ import subprocess
 # -----------------------------
 QUEUE_ASSET_PATH = os.environ.get("QUEUE_ASSET_PATH", "/Game/Cinematics/EditorMoviePipelineQueue")
 MRQ_CONFIG_PATH = os.environ.get("MRQ_CONFIG_PATH", "/Game/Cinematics/MoviePipelineQueueConfig")
-OUTPUT_JSON_DIR = os.environ.get("OUTPUT_JSON_DIR", r"D:\dataset")
-RENDER_OUTPUT_DIR = os.environ.get("RENDER_OUTPUT_DIR", r"D:\dataset\movies")
+OUTPUT_ROOT_DIR = os.environ.get("OUTPUT_ROOT_DIR", r"D:\dataset\output")
 MAP_PATH = os.environ.get("MAP_PATH", "/Game/Downtown_West/Maps/Demo_Environment")
-ENCODE_FPS = int(os.environ.get("ENCODE_FPS", "24"))
+ENCODE_FPS = int(os.environ.get("ENCODE_FPS", "15"))
 
 _executor_ref = None
 _job_output_info_for_encode = {}
@@ -26,26 +25,28 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip().strip(".")
 
 
-def _make_incremental_output_dir(base_dir: str, name: str) -> str:
-    """
-    创建输出目录：
-    - 首次:   <base>/<name>
-    - 冲突:   <base>/<name>_0001, _0002, ...
-    """
-    safe_name = _safe_filename(name) or "unnamed"
-    first_dir = os.path.join(base_dir, safe_name)
+def _extract_level_name_from_map_path(map_path: str) -> str:
+    if not map_path:
+        return "unknown_level"
+    return _safe_filename(map_path.split("/")[-1]) or "unknown_level"
 
-    if not os.path.exists(first_dir):
-        os.makedirs(first_dir, exist_ok=True)
-        return first_dir
 
-    idx = 1
-    while True:
-        candidate = os.path.join(base_dir, f"{safe_name}_{idx:04d}")
-        if not os.path.exists(candidate):
-            os.makedirs(candidate, exist_ok=True)
-            return candidate
-        idx += 1
+def _get_sequence_name(job) -> str:
+    seq = _resolve_sequence(job)
+    if seq:
+        try:
+            return _safe_filename(seq.get_name()) or "unnamed_sequence"
+        except Exception:
+            pass
+
+    job_name = job.job_name if job.job_name else "unnamed_sequence"
+    return _safe_filename(job_name) or "unnamed_sequence"
+
+
+def _build_output_dir(level_name: str, sequence_name: str) -> str:
+    out_dir = os.path.join(OUTPUT_ROOT_DIR, level_name, sequence_name)
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
 
 
 def _get_matrix_from_transform(transform: unreal.Transform):
@@ -202,26 +203,78 @@ def _to_ffmpeg_pattern(first_path: str, ext: str) -> str:
     return f"{prefix}.%0{len(digits)}d.{ext}"
 
 
-def _encode_mp4_from_png_dir(render_dir: str, safe_name: str, fps: int = 24):
+def _extract_frame_index(path: str) -> int:
+    base = os.path.basename(path)
+    m = re.search(r"\.(\d+)\.[^.]+$", base)
+    if not m:
+        return -1
+    return int(m.group(1))
+
+
+def _cleanup_png_sequence(render_dir: str, sequence_name: str):
+    png_glob = os.path.join(render_dir, f"{sequence_name}.*.png")
+    png_files = sorted(glob.glob(png_glob))
+    removed = 0
+
+    for p in png_files:
+        try:
+            os.remove(p)
+            removed += 1
+        except Exception as e:
+            unreal.log_warning(f"[{sequence_name}] 删除 PNG 失败: {p}, err={e}")
+
+    unreal.log(f"[{sequence_name}] PNG 清理完成，删除 {removed} 张")
+
+
+def _request_editor_exit():
     """
-    从 render_dir 中查找 <safe_name>.*.png，并调用 ffmpeg 合成 mp4。
+    在无界面批处理渲染结束后，主动请求编辑器退出。
     """
-    png_glob = os.path.join(render_dir, f"{safe_name}.*.png")
+    try:
+        unreal.SystemLibrary.quit_editor()
+    except Exception as e:
+        unreal.log_warning(f"调用 quit_editor 失败，尝试命令退出: {e}")
+        try:
+            world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+            unreal.SystemLibrary.execute_console_command(world, "QUIT_EDITOR")
+        except Exception as e2:
+            unreal.log_error(f"自动退出失败，请手动结束进程: {e2}")
+
+
+def _encode_mp4_from_png_dir(render_dir: str, sequence_name: str, fps: int = 24):
+    """
+    从 render_dir 中查找 <sequence_name>.*.png，并调用 ffmpeg 合成 mp4。
+    从第 1 帧开始合成（跳过 0000）。
+    """
+    png_glob = os.path.join(render_dir, f"{sequence_name}.*.png")
     png_files = sorted(glob.glob(png_glob))
     if not png_files:
-        unreal.log_warning(f"[{safe_name}] 未找到 PNG 序列，跳过转码: {png_glob}")
+        unreal.log_warning(f"[{sequence_name}] 未找到 PNG 序列，跳过转码: {png_glob}")
         return
 
-    input_pattern = _to_ffmpeg_pattern(png_files[0], "png")
+    start_file = None
+    for p in png_files:
+        idx = _extract_frame_index(p)
+        if idx >= 1:
+            start_file = p
+            break
+
+    if not start_file:
+        unreal.log_warning(f"[{sequence_name}] 未找到从第1帧开始的 PNG，跳过转码")
+        return
+
+    start_number = _extract_frame_index(start_file)
+    input_pattern = _to_ffmpeg_pattern(start_file, "png")
     if not input_pattern:
-        unreal.log_warning(f"[{safe_name}] 无法推断序列编号格式，跳过转码")
+        unreal.log_warning(f"[{sequence_name}] 无法推断序列编号格式，跳过转码")
         return
 
-    out_mp4 = os.path.join(render_dir, f"{safe_name}.mp4")
+    out_mp4 = os.path.join(render_dir, f"{sequence_name}.mp4")
     cmd = [
         "ffmpeg",
         "-y",
         "-framerate", str(fps),
+        "-start_number", str(start_number),
         "-i", input_pattern,
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
@@ -230,18 +283,19 @@ def _encode_mp4_from_png_dir(render_dir: str, safe_name: str, fps: int = 24):
         out_mp4,
     ]
 
-    unreal.log(f"[{safe_name}] 开始转码 MP4: {' '.join(cmd)}")
+    unreal.log(f"[{sequence_name}] 开始转码 MP4: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         if result.stdout:
             unreal.log(result.stdout)
         if result.stderr:
             unreal.log(result.stderr)
-        unreal.log(f"[{safe_name}] MP4 生成成功: {out_mp4}")
+        unreal.log(f"[{sequence_name}] MP4 生成成功: {out_mp4}")
+        _cleanup_png_sequence(render_dir, sequence_name)
     except FileNotFoundError:
         unreal.log_error("未找到 ffmpeg，请先在 Linux 镜像中安装 ffmpeg 并确保在 PATH 中")
     except subprocess.CalledProcessError as e:
-        unreal.log_error(f"[{safe_name}] ffmpeg 转码失败，退出码: {e.returncode}")
+        unreal.log_error(f"[{sequence_name}] ffmpeg 转码失败，退出码: {e.returncode}")
         if e.stdout:
             unreal.log_error(e.stdout)
         if e.stderr:
@@ -254,14 +308,16 @@ def _encode_mp4_from_png_dir(render_dir: str, safe_name: str, fps: int = 24):
 def _on_executor_finished(executor, success):
     if not success:
         unreal.log_error("渲染任务部分失败")
+        _request_editor_exit()
         return
 
     unreal.log("所有视频渲染及数据提取任务结束，开始合成 MP4...")
     for idx in sorted(_job_output_info_for_encode.keys()):
-        job_name, safe_name, render_dir = _job_output_info_for_encode[idx]
-        _encode_mp4_from_png_dir(render_dir, safe_name, fps=ENCODE_FPS)
+        _, sequence_name, render_dir = _job_output_info_for_encode[idx]
+        _encode_mp4_from_png_dir(render_dir, sequence_name, fps=ENCODE_FPS)
 
     unreal.log("所有 MP4 合成结束。")
+    _request_editor_exit()
 
 
 def render_queue_and_export_dataset():
@@ -281,38 +337,38 @@ def render_queue_and_export_dataset():
         unreal.log_warning("队列中没有任务，结束。")
         return
 
-    # 先确保基础目录存在
-    os.makedirs(OUTPUT_JSON_DIR, exist_ok=True)
-    os.makedirs(RENDER_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_ROOT_DIR, exist_ok=True)
+    level_name = _extract_level_name_from_map_path(MAP_PATH)
 
-    # 先为每个 job 分配唯一输出目录，后续 JSON 与渲染配置共用同一路径
-    job_output_info = {}  # idx -> (job_name, safe_name, render_dir)
+    # 每个 job 统一输出到 OUTPUT_ROOT/level_name/sequence_name
+    job_output_info = {}  # idx -> (level_name, sequence_name, render_dir)
     for idx, job in enumerate(jobs):
-        job_name = job.job_name if job.job_name else "unnamed"
-        safe_name = _safe_filename(job_name) or "unnamed"
-        render_dir = _make_incremental_output_dir(RENDER_OUTPUT_DIR, job_name)
-        job_output_info[idx] = (job_name, safe_name, render_dir)
+        sequence_name = _get_sequence_name(job)
+        render_dir = _build_output_dir(level_name, sequence_name)
+        job_output_info[idx] = (level_name, sequence_name, render_dir)
 
     # 供回调阶段使用（渲染完成后自动转码）
     _job_output_info_for_encode = dict(job_output_info)
 
     # 渲染前提取相机数据并写 jsonl
     for idx, job in enumerate(jobs):
-        job_name, safe_name, render_dir = job_output_info[idx]
-        unreal.log(f"正在渲染前提取相机数据: {job_name}")
+        level_name_i, sequence_name, render_dir = job_output_info[idx]
+        unreal.log(f"正在渲染前提取相机数据: {sequence_name}")
 
         try:
             data = _sample_camera_data(job)
             if data:
                 jsonl_obj = {
-                    "video_id": job_name,
-                    "video_path": f"{render_dir}/{safe_name}.####.png",
+                    "level_name": level_name_i,
+                    "sequence_name": sequence_name,
+                    "video_id": sequence_name,
+                    "video_path": f"{render_dir}/{sequence_name}.####.png",
                     "frame_count": len(data),
                     "camera_trajectory": data,
                     "text_prompt": "",
                 }
 
-                out_path = os.path.join(OUTPUT_JSON_DIR, f"{safe_name}.jsonl")
+                out_path = os.path.join(render_dir, f"{sequence_name}.jsonl")
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(json.dumps(jsonl_obj, ensure_ascii=False) + "\n")
 
@@ -322,7 +378,7 @@ def render_queue_and_export_dataset():
 
     # 配置渲染任务：输出改为 PNG + 唯一目录
     for idx, job in enumerate(jobs):
-        job_name, safe_name, render_dir = job_output_info[idx]
+        _, sequence_name, render_dir = job_output_info[idx]
 
         cfg = job.get_configuration()
         preset = unreal.EditorAssetLibrary.load_asset(MRQ_CONFIG_PATH)
@@ -330,10 +386,10 @@ def render_queue_and_export_dataset():
             cfg.copy_from(preset)
 
         job.map = unreal.SoftObjectPath(MAP_PATH)
-        _configure_png_output(cfg, render_dir, safe_name)
+        _configure_png_output(cfg, render_dir, sequence_name)
         job.set_configuration(cfg)
 
-        unreal.log(f"[{job_name}] 输出目录: {render_dir}")
+        unreal.log(f"[{sequence_name}] 输出目录: {render_dir}")
 
     _executor_ref = unreal.MoviePipelinePIEExecutor()
     _executor_ref.set_is_rendering_offscreen(True)

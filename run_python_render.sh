@@ -1,3 +1,7 @@
+export UPROJECT=/inspire/hdd/project/video-generation/public/hrw/Unreal_Render/town.uproject
+export PY_SCRIPT=/inspire/hdd/project/video-generation/public/hrw/Unreal_Render/Content/Python/movie_render.py
+export OUTPUT_ROOT_DIR=/inspire/hdd/project/video-generation/public/hrw/dataset
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -17,8 +21,11 @@ if [ ! -f "$UE_CMD" ]; then
 fi
 
 "$UE_CMD" "$UPROJECT" \
-  -unattended -NoSplash -NoLoadingScreen -NoSound -NoP4 \
+  -unattended -NoSplash -NoLoadingScreen -NoSound -NoP4 -vulkan \
   -RenderOffscreen \
   -stdout -FullStdOutLogOutput \
-  -ExecCmds="$PY_SCRIPT" \
-  -log
+  -ExecCmds="py $PY_SCRIPT" \
+  -log \
+  -NoWatchdog \
+  -NoMCP \
+  -Messaging=False
